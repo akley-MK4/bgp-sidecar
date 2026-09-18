@@ -15,7 +15,7 @@ data:
     pimd=no
     ldpd=no
     nhrpd=no
-    bfdd=no
+    bfdd=yes
     staticd=no
     vrrpd=no
     sharpd=no
@@ -68,13 +68,14 @@ spec:
           imagePullPolicy: IfNotPresent
 
         - name: bgp-sidecar
-          image: bgp-sidecar:ubuntu
+          image: bgp:testing
           imagePullPolicy: IfNotPresent
           securityContext:
             capabilities:
               add:
                 - NET_ADMIN
                 - NET_RAW
+                - NET_BIND_SERVICE
           env:
             - name: FRR_CONF_DIR
               value: /etc/frr

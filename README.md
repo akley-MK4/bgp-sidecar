@@ -7,7 +7,7 @@ This repository is intended for BGP-related implementation, documentation, and p
 
 ## Project requirements
 1. Kubernetes BGP sidecar: the project is intended to support a BGP sidecar pattern in which FRR runs inside a Kubernetes pod and provides BGP functionality for the workload.
-2. FRR build requirement: the Docker image must compile and install a specified FRR version as part of the image build process, including needed dependencies and runtime requirements.
+2. FRR image requirement: the Docker image uses an official FRR image and does not compile FRR as part of the image build process.
 3. Deployment requirement: the resulting sidecar must be compatible with Kubernetes pod deployment patterns and support BGP peering and route exchange as required by the deployment environment.
 
 ## Project Structure
@@ -20,9 +20,9 @@ bgp/
 │       ├── development-guide.instructions.md
 │       └── release-checklist.instructions.md
 ├── Dockerfile
-├── configs/
-│   ├── README.md
-│   └── frr.conf
+├── examples/
+│   └── k8s/
+│       └── bgp-sidecar.yaml
 ├── LICENSE
 ├── README.md
 └── ...

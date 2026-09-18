@@ -4,6 +4,7 @@ This repository is maintained as a focused BGP project built around the FRR (Fre
 
 ## Project principles
 - Keep the codebase readable, maintainable, and predictable.
+- Treat `examples/` as the repository's example-only directory for Kubernetes sidecar manifests and embedded FRR configuration.
 - Prefer small, well-scoped changes over broad refactors.
 - Document non-obvious logic and changed behavior.
 - Validate critical BGP and routing flows before merging or releasing.
@@ -11,6 +12,8 @@ This repository is maintained as a focused BGP project built around the FRR (Fre
 
 ## FRR-specific expectations
 - Treat FRR as the reference BGP implementation and align integrations with its operational model.
+- Use an official `quay.io/frrouting/frr` image instead of compiling FRR in the Dockerfile.
+- Enable only the `zebra`, `bgpd`, and `bfdd` daemons; keep other FRR daemons disabled.
 - Preserve routing correctness, interface behavior, and configuration semantics when modifying BGP-related logic.
 - Be careful with neighbor state, route advertisement, policy handling, and convergence-related changes.
 - Prefer configuration and behavior that remain compatible with FRR deployment practices.
