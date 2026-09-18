@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bgp-sidecar-config
+  namespace: default
+data:
+  daemons: |
+    zebra=yes
+    bgpd=yes
+    ospfd=no
+    ospf6d=no
+    isisd=no
+    ripd=no
+    ripngd=no
+    pimd=no
+    ldpd=no
+    nhrpd=no
+    bfdd=no
+    staticd=no
+    vrrpd=no
+    sharpd=no
+    pbrd=no
+    fabricd=no
+    vtysh_enable=yes
+  frr.conf: |
+    ! /etc/frr/frr.conf
+    !
+    ! Example BGP sidecar configuration for Kubernetes
+    !
+    hostname bgp-sidecar
+    service integrated-vtysh-config
+    !
+    interface lo
+     ip address 127.0.0.1/8
+    !
+    router bgp 65001
+     bgp router-id 10.0.0.10
+     neighbor 10.0.0.2 remote-as 65002
+     address-family ipv4 unicast
+      network 10.0.0.0/24
+     exit-address-family
+    !
+    line vty
+    !
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-with-bgp-sidecar
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-with-bgp-sidecar
+  template:
+    metadata:
+      labels:
+        app: app-with-bgp-sidecar
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - "sleep 3600"
+          imagePullPolicy: IfNotPresent
+
+        - name: bgp-sidecar
+          image: bgp-sidecar:ubuntu
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+          env:
+            - name: FRR_CONF_DIR
+              value: /etc/frr
+          ports:
+            - name: bgp
+              containerPort: 179
+              protocol: TCP
+          volumeMounts:
+            - name: frr-config
+              mountPath: /etc/frr
+              readOnly: false
+      volumes:
+        - name: frr-config
+          configMap:
+            name: bgp-sidecar-config
