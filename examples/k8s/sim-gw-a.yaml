@@ -1,0 +1,136 @@
+# Verification (run after BGP establishes):
+#   kubectl exec deploy/sim-gw-a -c svc -- ping -I 22.0.3.50 33.0.3.60
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sim-gw-a-config
+data:
+  daemons: |
+    zebra=yes
+    bgpd=yes
+    ospfd=no
+    ospf6d=no
+    isisd=no
+    ripd=no
+    ripngd=no
+    pimd=no
+    ldpd=no
+    nhrpd=no
+    bfdd=yes
+    staticd=no
+    vrrpd=no
+    sharpd=no
+    pbrd=no
+    fabricd=no
+    vtysh_enable=yes
+  frr.conf: |
+    ! /etc/frr/frr.conf
+    !
+    ! Simulated BGP gateway "sim-gw-a"
+    !
+    hostname sim-gw-a
+    service integrated-vtysh-config
+    !
+    ! Interfaces are created by the init container (init-net):
+    !   net1   = 11.0.3.50/24 (data plane)
+    !   lo:src = 22.0.3.50/24 (business logic, advertised via BGP)
+    !
+    router bgp 65001
+     bgp router-id 11.0.3.50
+     neighbor 11.0.3.60 remote-as 65002
+     address-family ipv4 unicast
+      network 22.0.3.0/24
+     exit-address-family
+    !
+    line vty
+    !
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sim-gw-a
+  labels:
+    app: sim-gw-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sim-gw-a
+  template:
+    metadata:
+      labels:
+        app: sim-gw-a
+      annotations:
+        k8s.v1.cni.cncf.io/networks: macvlan-enp4s0-2002
+    spec:
+      # macvlan bridge mode is L2-local: both gateway pods must land on the
+      # same node to reach each other directly on 11.0.3.0/24.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: sim-gw-b
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        # Creates the pod's network interfaces before FRR starts:
+        # - brings up net1 (attached by Multus as a raw macvlan, no IPAM)
+        #   and assigns its static data-plane address
+        # - creates the lo:src service loopback as a labeled alias on lo
+        - name: init-net
+          image: bgp:testing
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          command:
+            - /bin/sh
+            - -c
+            - |
+              ip link set lo up
+              ip link set net1 up
+              ip addr add 11.0.3.50/24 dev net1
+              ip addr add 22.0.3.50/24 dev lo label lo:src
+      containers:
+        # Main application container; periodically pings the peer's lo:src
+        # address through its own lo:src to verify BGP-routed connectivity.
+        - name: svc
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              while true; do
+                if ! ping -I 22.0.3.50 -c 1 -W 2 33.0.3.60 >/dev/null 2>&1; then
+                  echo "$(date): ping from 22.0.3.50 to 33.0.3.60 failed"
+                fi
+                sleep 10
+              done
+          imagePullPolicy: IfNotPresent
+        # BGP sidecar built from this repository's Dockerfile.
+        - name: bgp
+          image: bgp:testing
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+                - NET_BIND_SERVICE
+          env:
+            - name: FRR_CONF_DIR
+              value: /etc/frr
+          ports:
+            - name: bgp
+              containerPort: 179
+              protocol: TCP
+          volumeMounts:
+            - name: frr-config
+              mountPath: /etc/frr
+              readOnly: false
+      volumes:
+        - name: frr-config
+          configMap:
+            name: sim-gw-a-config

@@ -22,7 +22,9 @@ bgp/
 ├── Dockerfile
 ├── examples/
 │   └── k8s/
-│       └── bgp-sidecar.yaml
+│       ├── network.yaml
+│       ├── sim-gw-a.yaml
+│       └── sim-gw-b.yaml
 ├── LICENSE
 ├── README.md
 └── ...
@@ -41,6 +43,21 @@ The project standards and guidance are organized under the `.github/instructions
 - Document protocol behavior when logic is non-trivial or operationally sensitive.
 - Validate BGP and routing flows before merging or releasing.
 - Maintain compatibility unless a breaking change is explicitly intended.
+
+## Examples
+The `examples/k8s/` directory contains a BGP gateway simulation example (`network.yaml`, `sim-gw-a.yaml`, `sim-gw-b.yaml`). See `.github/instructions/README.instructions.md` for the detailed requirements.
+
+```sh
+kubectl apply -n <namespace> -f examples/k8s/network.yaml
+kubectl apply -n <namespace> -f examples/k8s/sim-gw-a.yaml
+kubectl apply -n <namespace> -f examples/k8s/sim-gw-b.yaml
+```
+
+The `svc` container continuously pings the peer's lo:src address every 10 seconds and logs failures. View its logs with:
+```sh
+kubectl logs -n <namespace> deploy/sim-gw-a -c svc
+kubectl logs -n <namespace> deploy/sim-gw-b -c svc
+```
 
 ## License
 This project is licensed under the terms of the included `LICENSE` file.
