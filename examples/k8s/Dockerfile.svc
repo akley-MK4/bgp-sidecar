@@ -1,0 +1,11 @@
+# Dockerfile for the svc container used in BGP gateway simulation examples.
+# The svc container runs connectivity verification (ping) between the two
+# simulated gateway pods.
+
+FROM alpine:3.24.2
+
+# Alpine includes ping via busybox or iputils; no additional packages needed.
+# ping requires CAP_NET_RAW capability (included in default container runtime).
+
+LABEL org.opencontainers.image.description="svc container for BGP gateway simulation"
+LABEL org.opencontainers.image.version="1.0.0"

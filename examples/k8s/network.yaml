@@ -17,9 +17,9 @@
 # - The VLAN device "vlan-enp4s0-2002" is created by NodeNetworkConfigurationPolicy
 #   on the target node(s).
 # - macvlan bridge mode is L2-local on a single node: the sim-gw-a and
-#   sim-gw-b Deployments enforce same-node scheduling via mutual podAffinity.
-#   For cross-node data-plane connectivity, ensure the VLAN is routed or use
-#   an overlay instead.
+#   sim-gw-b Deployments enforce same-node scheduling via nodeSelector
+#   (`kubernetes.io/hostname: agf`). For cross-node data-plane connectivity,
+#   ensure the VLAN is routed or use an overlay instead.
 ---
 apiVersion: nmstate.io/v1
 kind: NodeNetworkConfigurationPolicy

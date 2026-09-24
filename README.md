@@ -20,8 +20,12 @@ bgp/
 │       ├── development-guide.instructions.md
 │       └── release-checklist.instructions.md
 ├── Dockerfile
+├── Makefile
 ├── examples/
 │   └── k8s/
+│       ├── Dockerfile.svc
+│       ├── Makefile
+│       ├── README.md
 │       ├── network.yaml
 │       ├── sim-gw-a.yaml
 │       └── sim-gw-b.yaml
@@ -45,19 +49,28 @@ The project standards and guidance are organized under the `.github/instructions
 - Maintain compatibility unless a breaking change is explicitly intended.
 
 ## Examples
-The `examples/k8s/` directory contains a BGP gateway simulation example (`network.yaml`, `sim-gw-a.yaml`, `sim-gw-b.yaml`). See `.github/instructions/README.instructions.md` for the detailed requirements.
+The `examples/k8s/` directory contains a BGP gateway simulation example. See [examples/k8s/README.md](examples/k8s/README.md) for details.
+
+## Build
+
+### Root Makefile (BGP sidecar image)
+
+The root `Makefile` builds the FRR-based sidecar image and imports it into the cluster's containerd runtime:
 
 ```sh
-kubectl apply -n <namespace> -f examples/k8s/network.yaml
-kubectl apply -n <namespace> -f examples/k8s/sim-gw-a.yaml
-kubectl apply -n <namespace> -f examples/k8s/sim-gw-b.yaml
+# Build the Docker image and import into containerd
+make build-img
+
+# Remove the built image tag
+make rmi-repo-tag
 ```
 
-The `svc` container continuously pings the peer's lo:src address every 10 seconds and logs failures. View its logs with:
-```sh
-kubectl logs -n <namespace> deploy/sim-gw-a -c svc
-kubectl logs -n <namespace> deploy/sim-gw-b -c svc
-```
+| Target | Description |
+|--------|-------------|
+| `build-img` | Build `bgp:v1.0.0-beta.1` from `Dockerfile`, save as tar, import into containerd via `ctr` |
+| `rmi-repo-tag` | Remove the `bgp:v1.0.0-beta.1` image from Docker |
+
+See [examples/k8s/README.md](examples/k8s/README.md) for the svc image build and deployment targets.
 
 ## License
 This project is licensed under the terms of the included `LICENSE` file.

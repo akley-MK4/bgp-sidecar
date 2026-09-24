@@ -13,6 +13,10 @@ These instructions apply to code changes, documentation updates, reviews, and re
 The `examples/k8s/` directory is a single end-to-end BGP gateway simulation example. It demonstrates the FRR sidecar pattern with Multus networking and BGP route exchange between two simulated gateways. The files are templates for adaptation and are not production defaults.
 
 Files:
+- `Dockerfile` — builds the FRR-based sidecar image (`bgp:v1.0.0-beta.1`) from `quay.io/frrouting/frr`.
+- `Dockerfile.svc` — builds the Alpine-based svc/init-net container image (`svc:v1.0.0-beta.1`) for connectivity verification and interface setup.
+- `Makefile` — provides `build-svc` (build svc image + import into containerd), `deploy`/`undeploy` (manage sim-gw resources), and `rmi-svc-tag` targets.
+- `README.md` — end-to-end example documentation: overview, addressing, build/deploy/verify steps, and prerequisites.
 - `network.yaml` — combines `NodeNetworkConfigurationPolicy` for VLAN device (`vlan-enp4s0-2002`) and Multus `NetworkAttachmentDefinition` named `macvlan-enp4s0-2002`.
 - `sim-gw-a.yaml` — Deployment `sim-gw-a` with ConfigMap `sim-gw-a-config` (daemons + frr.conf).
 - `sim-gw-b.yaml` — Deployment `sim-gw-b` with ConfigMap `sim-gw-b-config` (daemons + frr.conf).
@@ -27,8 +31,8 @@ kubectl apply -n <namespace> -f examples/k8s/sim-gw-b.yaml
 The example covers the following requirements:
 
 1. ConfigMap-driven FRR configuration: `daemons` (zebra, bgpd, bfdd enabled) and `frr.conf` (BGP neighbors, route advertisement) mounted at `/etc/frr`, changeable without rebuilding the image. Interface addressing is owned by the init container, so `frr.conf` stays BGP-only.
-2. Init container and dual-container pod: each Deployment creates one pod with an `init-net` container (creates the `net1`/`lo:src` interfaces) plus two containers — `svc` (busybox:1.36, the workload) and `bgp` (`bgp:testing`, the FRR sidecar).
-3. Multus secondary interface: the pod's `net1` interface is attached via a `k8s.v1.cni.cncf.io/networks: macvlan-enp4s0-2002` annotation, backed by a macvlan bridge-mode NetworkAttachmentDefinition named `macvlan-enp4s0-2002`. No CNI IPAM — the `init-net` container brings it up and assigns the static address. Both Deployments use mutual `podAffinity` (`topologyKey: kubernetes.io/hostname`) to enforce same-node scheduling, since macvlan bridge mode is L2-local.
+2. Init container and dual-container pod: each Deployment creates one pod with an `init-net` container (`svc:v1.0.0-beta.1`, creates the `net1`/`lo:src` interfaces) plus two containers — `svc` (`svc:v1.0.0-beta.1`, the workload) and `bgp` (`bgp:v1.0.0-beta.1`, the FRR sidecar).
+3. Multus secondary interface: the pod's `net1` interface is attached via a `k8s.v1.cni.cncf.io/networks: macvlan-enp4s0-2002` annotation, backed by a macvlan bridge-mode NetworkAttachmentDefinition named `macvlan-enp4s0-2002`. No CNI IPAM — the `init-net` container brings it up and assigns the static address. Both Deployments use `nodeSelector: {kubernetes.io/hostname: agf}` to enforce same-node scheduling, since macvlan bridge mode is L2-local.
 4. Deterministic data-plane addressing: `init-net` configures `net1` as 11.0.3.50/24 on sim-gw-a and 11.0.3.60/24 on sim-gw-b.
 5. Business-logic loopback (`lo:src`): created by `init-net` as a labeled alias on `lo` — 22.0.3.50/24 on A, 33.0.3.60/24 on B — advertised over BGP so its traffic enters/exits through `net1`.
 6. BGP peering and route advertisement: sim-gw-a (AS 65001) peers with sim-gw-b (AS 65002) over net1 and advertises 22.0.3.0/24; sim-gw-b advertises 33.0.3.0/24 in return.

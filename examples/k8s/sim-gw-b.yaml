@@ -36,10 +36,16 @@ data:
     !   net1   = 11.0.3.60/24 (data plane)
     !   lo:src = 33.0.3.60/24 (business logic, advertised via BGP)
     !
+    route-map RM-ALLOW-PEER permit 10
+    !
     router bgp 65002
      bgp router-id 11.0.3.60
      neighbor 11.0.3.50 remote-as 65001
+     neighbor 11.0.3.50 route-map RM-ALLOW-PEER in
+     neighbor 11.0.3.50 route-map RM-ALLOW-PEER out
+     !
      address-family ipv4 unicast
+      neighbor 11.0.3.50 activate
       network 33.0.3.0/24
      exit-address-family
     !
@@ -66,20 +72,15 @@ spec:
     spec:
       # macvlan bridge mode is L2-local: both gateway pods must land on the
       # same node to reach each other directly on 11.0.3.0/24.
-      affinity:
-        podAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  app: sim-gw-a
-              topologyKey: kubernetes.io/hostname
+      nodeSelector:
+        kubernetes.io/hostname: agf
       initContainers:
         # Creates the pod's network interfaces before FRR starts:
         # - brings up net1 (attached by Multus as a raw macvlan, no IPAM)
         #   and assigns its static data-plane address
         # - creates the lo:src service loopback as a labeled alias on lo
         - name: init-net
-          image: bgp:testing
+          image: svc:v1.0.0-beta.1
           imagePullPolicy: IfNotPresent
           securityContext:
             capabilities:
@@ -97,21 +98,28 @@ spec:
         # Main application container; periodically pings the peer's lo:src
         # address through its own lo:src to verify BGP-routed connectivity.
         - name: svc
-          image: busybox:1.36
+          image: svc:v1.0.0-beta.1
           command:
             - /bin/sh
             - -c
             - |
+              prev_fail=0
               while true; do
-                if ! ping -I 33.0.3.60 -c 1 -W 2 22.0.3.50 >/dev/null 2>&1; then
-                  echo "$(date): ping from 33.0.3.60 to 22.0.3.50 failed"
+                if ping -I 33.0.3.60 -c 1 -W 2 22.0.3.50 >/dev/null 2>&1; then
+                  if [ "$prev_fail" -eq 1 ]; then
+                    echo "$(date): ping from 22.0.3.50 to 33.0.3.60 succeeded"
+                    prev_fail=0
+                  fi
+                else
+                  echo "$(date): ping from 22.0.3.50 to 33.0.3.60 failed"
+                  prev_fail=1
                 fi
                 sleep 10
               done
           imagePullPolicy: IfNotPresent
         # BGP sidecar built from this repository's Dockerfile.
         - name: bgp
-          image: bgp:testing
+          image: bgp:v1.0.0-beta.1
           imagePullPolicy: IfNotPresent
           securityContext:
             capabilities:
@@ -119,6 +127,7 @@ spec:
                 - NET_ADMIN
                 - NET_RAW
                 - NET_BIND_SERVICE
+                - SYS_ADMIN
           env:
             - name: FRR_CONF_DIR
               value: /etc/frr
