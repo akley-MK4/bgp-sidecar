@@ -1,5 +1,5 @@
 # Verification (run after BGP establishes):
-#   kubectl exec deploy/sim-gw-a -c svc -- ping -I 22.0.3.50 33.0.3.60
+#   kubectl exec deploy/sim-gw-a -c svc -- ping -6 -I fd42:2002:3:22::50 fd42:2002:3:33::60
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -24,6 +24,10 @@ data:
     pbrd=no
     fabricd=no
     vtysh_enable=yes
+  vtysh.conf: |
+    ! Minimal vtysh config to avoid warnings when running CLI commands.
+    ! The actual BGP configuration remains in frr.conf.
+    service integrated-vtysh-config
   frr.conf: |
     ! /etc/frr/frr.conf
     !
@@ -33,20 +37,38 @@ data:
     service integrated-vtysh-config
     !
     ! Interfaces are created by the init container (init-net):
-    !   net1   = 11.0.3.50/24 (data plane)
-    !   lo:src = 22.0.3.50/24 (business logic, advertised via BGP)
+    !   net1   = fd42:2002:3:1::50/64 (data plane)
+    !   lo:src = fd42:2002:3:22::50/64 (business logic, advertised via BGP)
     !
+    !
+    ! Match the default route separately so the inbound policy can reject it.
+    ipv6 prefix-list DEFAULT-ROUTE seq 5 permit ::/0
+    ! Only advertise this gateway's business subnet to the BGP peer.
+    ipv6 prefix-list GW-OUT seq 5 permit fd42:2002:3:22::/64
+    !
+    ! Reject a default route from the peer; send other accepted peer routes to table 1.
+    route-map RM-ALLOW-PEER deny 5
+     match peer fd42:2002:3:1::60
+     match ipv6 address prefix-list DEFAULT-ROUTE
     route-map RM-ALLOW-PEER permit 10
+     match peer fd42:2002:3:1::60
+     set table 1
+    !
+    ! Explicit outbound policy: permit only this gateway's business subnet.
+    route-map RM-ALLOW-OUT permit 5
+     match ipv6 address prefix-list GW-OUT
     !
     router bgp 65001
-     bgp router-id 11.0.3.50
-     neighbor 11.0.3.60 remote-as 65002
-     neighbor 11.0.3.60 route-map RM-ALLOW-PEER in
-     neighbor 11.0.3.60 route-map RM-ALLOW-PEER out
-     !
-     address-family ipv4 unicast
-      neighbor 11.0.3.60 activate
-      network 22.0.3.0/24
+    ! The router-id stays IPv4; BGP peering and NLRI use IPv6.
+    bgp router-id 11.0.3.50
+    neighbor fd42:2002:3:1::60 remote-as 65002
+    !
+    ! Advertise the business subnet configured on lo:src.
+    address-family ipv6 unicast
+     neighbor fd42:2002:3:1::60 activate
+     neighbor fd42:2002:3:1::60 route-map RM-ALLOW-PEER in
+     neighbor fd42:2002:3:1::60 route-map RM-ALLOW-OUT out
+     network fd42:2002:3:22::/64
      exit-address-family
     !
     line vty
@@ -71,7 +93,7 @@ spec:
         k8s.v1.cni.cncf.io/networks: macvlan-enp4s0-2002
     spec:
       # macvlan bridge mode is L2-local: both gateway pods must land on the
-      # same node to reach each other directly on 11.0.3.0/24.
+      # same node to reach each other directly on fd42:2002:3:1::/64.
       nodeSelector:
         kubernetes.io/hostname: agf
       initContainers:
@@ -92,8 +114,10 @@ spec:
             - |
               ip link set lo up
               ip link set net1 up
-              ip addr add 11.0.3.50/24 dev net1
-              ip addr add 22.0.3.50/24 dev lo label lo:src
+              ip -6 addr add fd42:2002:3:1::50/64 dev net1
+              ip -6 addr add fd42:2002:3:22::50/64 dev lo
+              echo "1 bgp-table" >> /etc/iproute2/rt_tables
+              ip -6 rule add from fd42:2002:3:22::/64 lookup 1 pref 100
       containers:
         # Main application container; periodically pings the peer's lo:src
         # address through its own lo:src to verify BGP-routed connectivity.
@@ -105,13 +129,13 @@ spec:
             - |
               prev_fail=0
               while true; do
-                if ping -I 22.0.3.50 -c 1 -W 2 33.0.3.60 >/dev/null 2>&1; then
+                if ping -6 -I fd42:2002:3:22::50 -c 1 -W 2 fd42:2002:3:33::60 >/dev/null 2>&1; then
                   if [ "$prev_fail" -eq 1 ]; then
-                    echo "$(date): ping from 22.0.3.50 to 33.0.3.60 succeeded"
+                    echo "$(date): ping from fd42:2002:3:22::50 to fd42:2002:3:33::60 succeeded"
                     prev_fail=0
                   fi
                 else
-                  echo "$(date): ping from 22.0.3.50 to 33.0.3.60 failed"
+                  echo "$(date): ping from fd42:2002:3:22::50 to fd42:2002:3:33::60 failed"
                   prev_fail=1
                 fi
                 sleep 10

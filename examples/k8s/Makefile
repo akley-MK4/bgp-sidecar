@@ -39,4 +39,24 @@ undeploy:
 rmi-svc-tag:
 	sudo docker rmi $(SVC_IMAGE_NAME):$(SVC_IMAGE_VER)
 
-.PHONY: build-svc install uninstall deploy undeploy rmi-svc-tag
+# Show IPv6 routes currently received via BGP on each sim-gw
+show-routes:
+	@echo "== sim-gw-a: IPv6 routes received from BGP neighbors =="
+	kubectl exec deploy/sim-gw-a -c bgp -- vtysh -c "show bgp ipv6 unicast"
+	kubectl exec deploy/sim-gw-a -c bgp -- bash -c "ip -6 route show table 1"
+	kubectl exec deploy/sim-gw-a -c bgp -- bash -c "ip -6 rule show"
+	@echo "\n"
+	@echo "== sim-gw-b: IPv6 routes received from BGP neighbors =="
+	kubectl exec deploy/sim-gw-b -c bgp -- vtysh -c "show bgp ipv6 unicast"
+	kubectl exec deploy/sim-gw-b -c bgp -- bash -c "ip -6 route show table 1"
+	kubectl exec deploy/sim-gw-b -c bgp -- bash -c "ip -6 rule show"
+
+# Show the latest 100 log lines from all containers in each sim-gw pod
+show-logs:
+	@echo "== sim-gw-a: latest 100 log lines per container =="
+	kubectl logs deploy/sim-gw-a --all-containers=true --tail=100 --prefix=true
+	@echo "\n\n\n"
+	@echo "== sim-gw-b: latest 100 log lines per container =="
+	kubectl logs deploy/sim-gw-b --all-containers=true --tail=100 --prefix=true
+
+.PHONY: build-svc install uninstall deploy undeploy rmi-svc-tag show-routes show-logs

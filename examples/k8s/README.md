@@ -10,6 +10,10 @@ Two gateway pods (`sim-gw-a` and `sim-gw-b`) run on the same node, connected via
 - **svc** (`svc:v1.0.0-beta.1`) — workload container that pings the peer's `lo:src` address every 10 seconds.
 - **bgp** (`bgp:v1.0.0-beta.1`) — FRR sidecar that establishes BGP peering and advertises routes.
 
+## Network diagram
+
+![sim-gw-a and sim-gw-b network topology](sim-gw-network.svg)
+
 ## Files
 
 | File | Description |
@@ -19,6 +23,8 @@ Two gateway pods (`sim-gw-a` and `sim-gw-b`) run on the same node, connected via
 | `network.yaml` | `NodeNetworkConfigurationPolicy` (VLAN device) + Multus `NetworkAttachmentDefinition` (`macvlan-enp4s0-2002`) |
 | `sim-gw-a.yaml` | Deployment `sim-gw-a` + ConfigMap `sim-gw-a-config` (AS 65001) |
 | `sim-gw-b.yaml` | Deployment `sim-gw-b` + ConfigMap `sim-gw-b-config` (AS 65002) |
+| `sim-gw-network.puml` | PlantUML source for the network diagram |
+| `sim-gw-network.svg` | Rendered network diagram embedded above |
 
 ## Requirements
 
@@ -31,10 +37,12 @@ Two gateway pods (`sim-gw-a` and `sim-gw-b`) run on the same node, connected via
 
 | Pod | net1 (data plane) | lo:src (business) | AS |
 |-----|-------------------|--------------------|------|
-| sim-gw-a | 11.0.3.50/24 | 22.0.3.50/24 | 65001 |
-| sim-gw-b | 11.0.3.60/24 | 33.0.3.60/24 | 65002 |
+| sim-gw-a | `fd42:2002:3:1::50/64` | `fd42:2002:3:22::50/64` | 65001 |
+| sim-gw-b | `fd42:2002:3:1::60/64` | `fd42:2002:3:33::60/64` | 65002 |
 
-sim-gw-a advertises `22.0.3.0/24` over BGP; sim-gw-b advertises `33.0.3.0/24`.
+The pods peer over IPv6 on `fd42:2002:3:1::/64`. sim-gw-a advertises
+`fd42:2002:3:22::/64` over BGP; sim-gw-b advertises `fd42:2002:3:33::/64`.
+BGP router IDs remain IPv4 values, as required by the BGP protocol.
 
 ## Build
 
@@ -82,8 +90,8 @@ kubectl logs -n <namespace> deploy/sim-gw-b -c svc
 Manual verification:
 
 ```sh
-kubectl exec deploy/sim-gw-a -c svc -- ping -I 22.0.3.50 33.0.3.60
-kubectl exec deploy/sim-gw-b -c svc -- ping -I 33.0.3.60 22.0.3.50
+kubectl exec deploy/sim-gw-a -c svc -- ping -6 -I fd42:2002:3:22::50 fd42:2002:3:33::60
+kubectl exec deploy/sim-gw-b -c svc -- ping -6 -I fd42:2002:3:33::60 fd42:2002:3:22::50
 ```
 
 ## Makefile targets
@@ -94,3 +102,5 @@ kubectl exec deploy/sim-gw-b -c svc -- ping -I 33.0.3.60 22.0.3.50
 | `deploy` | Apply `network.yaml`, `sim-gw-a.yaml`, `sim-gw-b.yaml` |
 | `undeploy` | Delete all sim-gw resources |
 | `rmi-svc-tag` | Remove the `svc:v1.0.0-beta.1` image from Docker |
+| `show-routes` | Show BGP routes currently received on `sim-gw-a` and `sim-gw-b` |
+| `show-logs` | Show the latest 100 log lines per container for both gateways |
