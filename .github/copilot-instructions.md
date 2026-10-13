@@ -14,6 +14,7 @@ This repository is maintained as a focused BGP project built around the FRR (Fre
 - Treat FRR as the reference BGP implementation and align integrations with its operational model.
 - Use an official `quay.io/frrouting/frr` image instead of compiling FRR in the Dockerfile.
 - Enable only the `zebra`, `bgpd`, and `bfdd` daemons; keep other FRR daemons disabled.
+- Keep the container running as root (EUID=0); do not add `USER frr`. `/usr/lib/frr/docker-start` requires root, and the daemons drop privileges themselves.
 - Preserve routing correctness, interface behavior, and configuration semantics when modifying BGP-related logic.
 - Be careful with neighbor state, route advertisement, policy handling, and convergence-related changes.
 - Prefer configuration and behavior that remain compatible with FRR deployment practices.

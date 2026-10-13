@@ -13,4 +13,7 @@ RUN apk add --no-cache libcap \
 
 EXPOSE 179 2601 2602 2603 2604 2605 2606 2607 2608 2609 2610
 
-USER frr
+# FRR's docker-start script must run as root to manage daemon lifecycle.
+# Individual daemons (zebra, bgpd, bfdd) drop privileges to the frr user.
+# See frrcommon.sh: is_user_root() requires EUID=0.
+ENTRYPOINT ["/sbin/tini", "--", "/usr/lib/frr/docker-start"]

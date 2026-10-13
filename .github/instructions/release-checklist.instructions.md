@@ -13,7 +13,7 @@ applyTo: "**/*"
 - [ ] Dockerfile validation uses the image tag `bgp:testing` (for example, `docker build -t bgp:testing .`).
 - [ ] The Docker image uses an official `quay.io/frrouting/frr` image without compiling FRR.
 - [ ] Only `zebra`, `bgpd`, and `bfdd` are enabled; all other FRR daemons are disabled.
-- [ ] The FRR container runs as the non-root `frr` user.
+- [ ] The FRR container runs as root (EUID=0) with no `USER frr` directive, since `/usr/lib/frr/docker-start` requires it and the daemons drop privileges themselves.
 - [ ] The `zebra`, `bgpd`, and `bfdd` binaries have `CAP_NET_ADMIN`, `CAP_NET_RAW`, and `CAP_NET_BIND_SERVICE` file capabilities.
 - [ ] The sidecar grants `NET_ADMIN`, `NET_RAW`, and `NET_BIND_SERVICE` capabilities.
 - [ ] The FRR version used in the image is the intended target version.

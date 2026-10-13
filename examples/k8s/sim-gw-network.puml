@@ -1,0 +1,64 @@
+@startuml
+title sim-gw-a / sim-gw-b network interaction
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+node "Kubernetes node: agf" as agf {
+  node "Pod: sim-gw-a\nAS 65001" as podA {
+    component "svc-a\nsource: fd42:2002:3:22::50" as svcA
+    component "Linux IPv6 policy routing\nfrom fd42:2002:3:22::/64\nlookup table 1" as routeA
+    component "eth0: 10.42.0.245/32\ndefault CNI Pod IP" as eth0A
+    component "net1: fd42:2002:3:1::50/64\nlo:src: fd42:2002:3:22::50/64" as ifaceA
+    component "FRR bgpd\nrouter-id 11.0.3.50" as bgpA
+  }
+
+  node "Pod: sim-gw-b\nAS 65002" as podB {
+    component "svc-b\nsource: fd42:2002:3:33::60" as svcB
+    component "Linux IPv6 policy routing\nfrom fd42:2002:3:33::/64\nlookup table 1" as routeB
+    component "eth0: 10.42.0.246/32\ndefault CNI Pod IP" as eth0B
+    component "net1: fd42:2002:3:1::60/64\nlo:src: fd42:2002:3:33::60/64" as ifaceB
+    component "FRR bgpd\nrouter-id 11.0.3.60" as bgpB
+  }
+}
+
+cloud "VLAN 2002\nMultus macvlan bridge\nfd42:2002:3:1::/64" as vlan
+cloud "Kubernetes default Pod network\nCNI/IPAM" as podNetwork
+
+ifaceA -- vlan
+ifaceB -- vlan
+eth0A -- podNetwork
+eth0B -- podNetwork
+bgpA -- bgpB : IPv6 eBGP over net1\nTCP/179
+
+svcA --> routeA : ICMPv6 request\nfd42:2002:3:22::50 -> fd42:2002:3:33::60
+routeA --> ifaceA : table 1 route\nvia fd42:2002:3:1::60
+ifaceA --> ifaceB : Routed ICMP request
+ifaceB --> routeB : Destination fd42:2002:3:33::60
+routeB --> svcB : Deliver to lo:src
+
+svcB --> routeB : ICMPv6 reply\nfd42:2002:3:33::60 -> fd42:2002:3:22::50
+routeB --> ifaceB : table 1 route\nvia fd42:2002:3:1::50
+ifaceB --> ifaceA : Routed ICMP reply
+ifaceA --> routeA : Destination fd42:2002:3:22::50
+routeA --> svcA : Deliver to lo:src
+
+note bottom of bgpA
+  Outbound RM-ALLOW-OUT permits fd42:2002:3:22::/64.
+  Inbound RM-ALLOW-PEER rejects ::/0;
+  other accepted routes are installed in table 1.
+end note
+
+note bottom of bgpB
+  Outbound RM-ALLOW-OUT permits fd42:2002:3:33::/64.
+  Inbound RM-ALLOW-PEER rejects ::/0;
+  other accepted routes are installed in table 1.
+end note
+
+note right of vlan
+  Each gateway advertises its lo:src business subnet.
+  Learned remote subnet routes feed the table 1 policy paths above.
+end note
+
+@enduml

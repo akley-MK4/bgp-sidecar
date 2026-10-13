@@ -1,0 +1,169 @@
+# Verification (run after BGP establishes):
+#   kubectl exec deploy/sim-gw-b -c svc -- ping -6 -I fd42:2002:3:33::60 fd42:2002:3:22::50
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sim-gw-b-config
+data:
+  daemons: |
+    zebra=yes
+    bgpd=yes
+    ospfd=no
+    ospf6d=no
+    isisd=no
+    ripd=no
+    ripngd=no
+    pimd=no
+    ldpd=no
+    nhrpd=no
+    bfdd=yes
+    staticd=no
+    vrrpd=no
+    sharpd=no
+    pbrd=no
+    fabricd=no
+    vtysh_enable=yes
+  vtysh.conf: |
+    ! Minimal vtysh config to avoid warnings when running CLI commands.
+    ! The actual BGP configuration remains in frr.conf.
+    service integrated-vtysh-config
+  frr.conf: |
+    ! /etc/frr/frr.conf
+    !
+    ! Simulated BGP gateway "sim-gw-b"
+    !
+    hostname sim-gw-b
+    service integrated-vtysh-config
+    !
+    ! Interfaces are created by the init container (init-net):
+    !   net1   = fd42:2002:3:1::60/64 (data plane)
+    !   lo:src = fd42:2002:3:33::60/64 (business logic, advertised via BGP)
+    !
+    !
+    ! Match the default route separately so the inbound policy can reject it.
+    ipv6 prefix-list DEFAULT-ROUTE seq 5 permit ::/0
+    ! Only advertise this gateway's business subnet to the BGP peer.
+    ipv6 prefix-list GW-OUT seq 5 permit fd42:2002:3:33::/64
+    !
+    ! Reject a default route from the peer; send other accepted peer routes to table 1.
+    route-map RM-ALLOW-PEER deny 5
+     match peer fd42:2002:3:1::50
+     match ipv6 address prefix-list DEFAULT-ROUTE
+    route-map RM-ALLOW-PEER permit 10
+     match peer fd42:2002:3:1::50
+     set table 1
+    !
+    ! Explicit outbound policy: permit only this gateway's business subnet.
+    route-map RM-ALLOW-OUT permit 5
+     match ipv6 address prefix-list GW-OUT
+    !
+    router bgp 65002
+    ! The router-id stays IPv4; BGP peering and NLRI use IPv6.
+    bgp router-id 11.0.3.60
+    neighbor fd42:2002:3:1::50 remote-as 65001
+    !
+    ! Advertise the business subnet configured on lo:src.
+    address-family ipv6 unicast
+     neighbor fd42:2002:3:1::50 activate
+     neighbor fd42:2002:3:1::50 route-map RM-ALLOW-PEER in
+     neighbor fd42:2002:3:1::50 route-map RM-ALLOW-OUT out
+     network fd42:2002:3:33::/64
+     exit-address-family
+    !
+    line vty
+    !
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sim-gw-b
+  labels:
+    app: sim-gw-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sim-gw-b
+  template:
+    metadata:
+      labels:
+        app: sim-gw-b
+      annotations:
+        k8s.v1.cni.cncf.io/networks: macvlan-enp4s0-2002
+    spec:
+      # macvlan bridge mode is L2-local: both gateway pods must land on the
+      # same node to reach each other directly on fd42:2002:3:1::/64.
+      nodeSelector:
+        kubernetes.io/hostname: agf
+      initContainers:
+        # Creates the pod's network interfaces before FRR starts:
+        # - brings up net1 (attached by Multus as a raw macvlan, no IPAM)
+        #   and assigns its static data-plane address
+        # - creates the lo:src service loopback as a labeled alias on lo
+        - name: init-net
+          image: svc:v1.0.0-beta.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          command:
+            - /bin/sh
+            - -c
+            - |
+              ip link set lo up
+              ip link set net1 up
+              ip -6 addr add fd42:2002:3:1::60/64 dev net1
+              ip -6 addr add fd42:2002:3:33::60/64 dev lo
+              echo "1 bgp-table" >> /etc/iproute2/rt_tables
+              ip -6 rule add from fd42:2002:3:33::/64 lookup 1 pref 100
+      containers:
+        # Main application container; periodically pings the peer's lo:src
+        # address through its own lo:src to verify BGP-routed connectivity.
+        - name: svc
+          image: svc:v1.0.0-beta.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              prev_fail=0
+              while true; do
+                if ping -6 -I fd42:2002:3:33::60 -c 1 -W 2 fd42:2002:3:22::50 >/dev/null 2>&1; then
+                  if [ "$prev_fail" -eq 1 ]; then
+                    echo "$(date): ping from fd42:2002:3:33::60 to fd42:2002:3:22::50 succeeded"
+                    prev_fail=0
+                  fi
+                else
+                  echo "$(date): ping from fd42:2002:3:33::60 to fd42:2002:3:22::50 failed"
+                  prev_fail=1
+                fi
+                sleep 10
+              done
+          imagePullPolicy: IfNotPresent
+        # BGP sidecar built from this repository's Dockerfile.
+        - name: bgp
+          image: bgp:v1.0.0-beta.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+                - NET_BIND_SERVICE
+                - SYS_ADMIN
+          env:
+            - name: FRR_CONF_DIR
+              value: /etc/frr
+          ports:
+            - name: bgp
+              containerPort: 179
+              protocol: TCP
+          volumeMounts:
+            - name: frr-config
+              mountPath: /etc/frr
+              readOnly: false
+      volumes:
+        - name: frr-config
+          configMap:
+            name: sim-gw-b-config
